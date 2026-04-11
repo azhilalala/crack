@@ -14,8 +14,8 @@
 2. 线距计算：对背景（间隙区域）做距离变换，取骨架点处距离值的最小值 × 2
 """
 
+import logging
 import os
-import glob as glob_module
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -23,6 +23,10 @@ import cv2
 import numpy as np
 from scipy import ndimage
 from skimage.morphology import skeletonize
+
+logger = logging.getLogger(__name__)
+
+_IMAGE_EXTENSIONS = (".jpeg", ".jpg", ".png", ".bmp", ".tif", ".tiff")
 
 
 @dataclass
@@ -120,7 +124,9 @@ class LineMetricsCalculator:
         # 最小线宽 = 2 × 最小半宽度
         min_half_width = skeleton_distances.min()
         if min_half_width == 0:
-            # 仅1像素宽的线，宽度设为1
+            # Single-pixel-wide line: the distance transform is 0 at the
+            # boundary but skeletonize still produces a skeleton point there.
+            # Treat this as a line of width 1 pixel.
             return 1.0
         return float(min_half_width * 2)
 
@@ -190,7 +196,8 @@ class LineMetricsCalculator:
                     all_widths.append(metrics.min_line_width)
                 if metrics.min_line_spacing is not None:
                     all_spacings.append(metrics.min_line_spacing)
-            except (FileNotFoundError, cv2.error):
+            except (FileNotFoundError, cv2.error) as exc:
+                logger.warning("跳过图像 %s: %s", path, exc)
                 continue
 
         return LayerMetrics(
@@ -253,7 +260,7 @@ class LineMetricsCalculator:
         )
 
     @staticmethod
-    def load_image_paths(directory: str, pattern: str = "*.jpeg") -> List[str]:
+    def load_image_paths(directory: str, extensions: tuple = _IMAGE_EXTENSIONS) -> List[str]:
         """
         从目录加载图像文件路径列表。
 
@@ -261,15 +268,19 @@ class LineMetricsCalculator:
         ----------
         directory : str
             图像所在目录
-        pattern : str
-            文件匹配模式，默认 "*.jpeg"
+        extensions : tuple of str
+            要匹配的文件扩展名，默认匹配常见图像格式
 
         Returns
         -------
         list of str
             匹配到的文件路径列表（排序后）
         """
-        paths = sorted(glob_module.glob(os.path.join(directory, pattern)))
+        paths = sorted(
+            os.path.join(directory, f)
+            for f in os.listdir(directory)
+            if f.lower().endswith(extensions)
+        )
         return paths
 
 
